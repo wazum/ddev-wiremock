@@ -21,15 +21,19 @@ post_install_actions:
     #ddev-description:Seed .ddev/.env.wiremock with defaults if not present
     env_file="$DDEV_APPROOT/.ddev/.env.wiremock"
     if [ ! -f "$env_file" ]; then
-      ddev dotenv set .ddev/.env.wiremock --wiremock-tag=3x
+      ddev dotenv set .ddev/.env.wiremock \
+        --wiremock-tag=3x \
+        --wiremock-http-port=8080 \
+        --wiremock-https-port=8443
       printf '#ddev-generated\n%s' "$(cat "$env_file")" > "$env_file"
     fi
   - |
     #ddev-description:Inject DDEV_WIREMOCK_* into the web container
-    ddev config --web-environment-add="DDEV_WIREMOCK_URL=http://wiremock:8080,DDEV_WIREMOCK_ADMIN_URL=http://wiremock:8080/__admin,DDEV_WIREMOCK_PUBLIC_URL=https://${DDEV_HOSTNAME}:8443"
+    ddev config --web-environment-add="DDEV_WIREMOCK_URL=http://wiremock:8080,DDEV_WIREMOCK_ADMIN_URL=http://wiremock:8080/__admin"
   - |
     #ddev-description:Print usage hint
-    echo "WireMock available at https://${DDEV_HOSTNAME}:8443 after 'ddev restart'."
+    https_port=$(grep '^WIREMOCK_HTTPS_PORT=' "$DDEV_APPROOT/.ddev/.env.wiremock" 2>/dev/null | cut -d= -f2 | tr -d '"' || echo 8443)
+    echo "WireMock available at https://${DDEV_HOSTNAME}:${https_port:-8443} after 'ddev restart'."
     echo "Stub authoring: see .ddev/wiremock/README.md."
 
 removal_actions:
