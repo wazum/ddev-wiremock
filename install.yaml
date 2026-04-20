@@ -1,0 +1,44 @@
+name: wiremock
+
+ddev_version_constraint: '>= v1.24.10'
+
+project_files:
+  - docker-compose.wiremock.yaml
+  - wiremock/mappings/sample.json
+  - wiremock/mappings/.gitkeep
+  - wiremock/__files/.gitkeep
+  - wiremock/README.md
+  - commands/host/wiremock-reset
+  - commands/host/wiremock-mappings
+  - commands/host/wiremock-requests
+  - commands/host/wiremock-logs
+  - commands/host/wiremock-record
+  - commands/host/wiremock-record-stop
+  - commands/host/wiremock-snapshot
+
+post_install_actions:
+  - |
+    #ddev-description:Seed .ddev/.env.wiremock with defaults if not present
+    env_file="$DDEV_APPROOT/.ddev/.env.wiremock"
+    if [ ! -f "$env_file" ]; then
+      ddev dotenv set .ddev/.env.wiremock --wiremock-tag=3x
+      printf '#ddev-generated\n%s' "$(cat "$env_file")" > "$env_file"
+    fi
+  - |
+    #ddev-description:Inject DDEV_WIREMOCK_* into the web container
+    ddev config --web-environment-add="DDEV_WIREMOCK_URL=http://wiremock:8080,DDEV_WIREMOCK_ADMIN_URL=http://wiremock:8080/__admin,DDEV_WIREMOCK_PUBLIC_URL=https://${DDEV_HOSTNAME}:8443"
+  - |
+    #ddev-description:Print usage hint
+    echo "WireMock available at https://${DDEV_HOSTNAME}:8443 after 'ddev restart'."
+    echo "Stub authoring: see .ddev/wiremock/README.md."
+
+removal_actions:
+  - |
+    #ddev-description:Remove .env.wiremock only if untouched
+    file="${DDEV_APPROOT}/.ddev/.env.wiremock"
+    if [ -f "$file" ] && grep -q '#ddev-generated' "$file"; then
+      rm -f "$file"
+    fi
+  - |
+    #ddev-description:Preserve user-authored stubs by default
+    echo ".ddev/wiremock/ retained - delete manually if no longer needed."
