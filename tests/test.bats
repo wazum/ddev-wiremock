@@ -130,3 +130,57 @@ teardown() {
   assert_output --partial "--id"
   assert_output --partial "--json"
 }
+
+@test "wiremock-requests shows recent journal entries after a request" {
+  run curl -sf -k "https://${PROJNAME}.ddev.site:8443/sample"
+  assert_success
+
+  run ddev wiremock-requests
+  assert_success
+  assert_output --partial "TIME"
+  assert_output --partial "METHOD"
+  assert_output --partial "STATUS"
+  assert_output --partial "GET"
+  assert_output --partial "200"
+  assert_output --partial "/sample"
+}
+
+@test "wiremock-requests marks unmatched requests in default output" {
+  run curl -sf -k "https://${PROJNAME}.ddev.site:8443/never-stubbed-xyz" || true
+
+  run ddev wiremock-requests --limit 50
+  assert_success
+  assert_output --partial "/never-stubbed-xyz"
+  assert_output --partial "unmatched"
+}
+
+@test "wiremock-requests --unmatched filters to unmatched" {
+  run curl -sf -k "https://${PROJNAME}.ddev.site:8443/never-stubbed-path-xyz" || true
+
+  run ddev wiremock-requests --unmatched
+  assert_success
+  assert_output --partial "/never-stubbed-path-xyz"
+}
+
+@test "wiremock-requests --json outputs full JSON" {
+  run curl -sf -k "https://${PROJNAME}.ddev.site:8443/sample"
+  assert_success
+
+  run ddev wiremock-requests --json
+  assert_success
+  assert_output --partial '"requests"'
+}
+
+@test "wiremock-requests --limit rejects invalid values" {
+  run ddev wiremock-requests --limit -5
+  assert_failure
+  assert_output --partial "error"
+}
+
+@test "wiremock-requests --help prints usage" {
+  run ddev wiremock-requests --help
+  assert_success
+  assert_output --partial "Usage:"
+  assert_output --partial "--limit"
+  assert_output --partial "--unmatched"
+}

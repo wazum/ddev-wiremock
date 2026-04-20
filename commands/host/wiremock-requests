@@ -1,10 +1,97 @@
 #!/usr/bin/env bash
 #ddev-generated
 ## Description: Show recent requests received by WireMock
-## Usage: wiremock-requests [--limit N] [--unmatched]
-## Example: ddev wiremock-requests --limit 20
+## Usage: wiremock-requests [--limit N] [--unmatched] [--json]
+## Example: "ddev wiremock-requests"
+## Example: "ddev wiremock-requests --limit 50"
+## Example: "ddev wiremock-requests --unmatched"
+## Example: "ddev wiremock-requests --json | jq '.requests[0]'"
 
 set -euo pipefail
 
-echo "wiremock-requests: not implemented yet" >&2
-exit 1
+limit=20
+unmatched=false
+format=compact
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --limit)
+      shift
+      limit="${1:-}"
+      if ! [[ "$limit" =~ ^[0-9]+$ ]] || [ "$limit" -lt 1 ]; then
+        echo "error: --limit requires a positive integer." >&2
+        exit 2
+      fi
+      ;;
+    --unmatched)
+      unmatched=true
+      ;;
+    --json)
+      format=json
+      ;;
+    -h|--help)
+      sed -n 's/^## //p' "$0"
+      exit 0
+      ;;
+    *)
+      echo "error: unknown argument: $1" >&2
+      echo "Try: ddev wiremock-requests --help" >&2
+      exit 2
+      ;;
+  esac
+  shift
+done
+
+if [ "$unmatched" = true ]; then
+  url="http://wiremock:8080/__admin/requests/unmatched"
+  # Unmatched endpoint: each .requests[] IS a raw request object.
+  jq_expr='(.requests // [])
+    | .[]
+    | [(.loggedDateString // ""), (.method // "?"), "-", (.url // "?")]
+    | @tsv'
+else
+  url="http://wiremock:8080/__admin/requests?limit=${limit}"
+  # Journal endpoint: each entry wraps request in .request and has .response + .wasMatched.
+  jq_expr='(.requests // [])
+    | .[]
+    | [
+        (.request.loggedDateString // ""),
+        (.request.method // "?"),
+        ((.response.status // .responseDefinition.status // "?") | tostring),
+        ((.request.url // "?") + (if .wasMatched == false then "   (unmatched)" else "" end))
+      ]
+    | @tsv'
+fi
+
+if [ "$format" = "json" ]; then
+  if ! output=$(ddev exec "curl -fsS '${url}' | jq ." 2>&1); then
+    echo "error: WireMock not reachable." >&2
+    echo "Check 'ddev describe' and 'ddev wiremock-logs'." >&2
+    exit 1
+  fi
+  printf '%s\n' "$output"
+  exit 0
+fi
+
+if ! tsv=$(ddev exec "curl -fsS '${url}' | jq -r '${jq_expr}'" 2>&1); then
+  echo "error: WireMock not reachable." >&2
+  echo "Check 'ddev describe' and 'ddev wiremock-logs'." >&2
+  exit 1
+fi
+
+if [ -z "$tsv" ]; then
+  if [ "$unmatched" = true ]; then
+    echo "No unmatched requests."
+  else
+    echo "No requests in journal."
+    echo "Issue requests against WireMock, then re-run."
+  fi
+  exit 0
+fi
+
+printf '%-12s  %-7s  %-6s  %s\n' "TIME" "METHOD" "STATUS" "URL"
+while IFS=$'\t' read -r logged method status url_path; do
+  when="${logged:11:8}"
+  [ -z "$when" ] && when="$logged"
+  printf '%-12s  %-7s  %-6s  %s\n' "$when" "$method" "$status" "$url_path"
+done <<< "$tsv"
