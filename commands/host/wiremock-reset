@@ -2,9 +2,45 @@
 #ddev-generated
 ## Description: Reset WireMock runtime state (mappings and request journal)
 ## Usage: wiremock-reset [--yes]
-## Example: ddev wiremock-reset
+## Example: "ddev wiremock-reset" (prompts for confirmation)
+## Example: "ddev wiremock-reset --yes" (skips prompt, for scripts)
+##
+## This wipes runtime-added stubs and the request journal. File-backed stubs
+## under .ddev/wiremock/mappings/ are reloaded automatically.
 
 set -euo pipefail
 
-echo "wiremock-reset: not implemented yet" >&2
-exit 1
+assume_yes=false
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --yes|-y)
+      assume_yes=true
+      ;;
+    -h|--help)
+      sed -n 's/^## //p' "$0"
+      exit 0
+      ;;
+    *)
+      echo "error: unknown argument: $1" >&2
+      echo "Try: ddev wiremock-reset --help" >&2
+      exit 2
+      ;;
+  esac
+  shift
+done
+
+if [ "$assume_yes" != true ]; then
+  read -r -p "Reset WireMock mappings and request journal? [y/N] " reply
+  case "$reply" in
+    y|Y|yes|YES) ;;
+    *) echo "aborted."; exit 0 ;;
+  esac
+fi
+
+if ! ddev exec "curl -fsS -X POST http://wiremock:8080/__admin/reset" >/dev/null 2>&1; then
+  echo "error: WireMock not reachable or reset failed." >&2
+  echo "Check 'ddev describe' and 'ddev wiremock-logs'." >&2
+  exit 1
+fi
+
+echo "WireMock reset. File-backed stubs reloaded from .ddev/wiremock/mappings/."

@@ -184,3 +184,41 @@ teardown() {
   assert_output --partial "--limit"
   assert_output --partial "--unmatched"
 }
+
+@test "wiremock-reset clears runtime stubs and journal but keeps file-backed stubs" {
+  # Add a runtime-only stub.
+  run ddev exec "curl -fsS -X POST -H 'Content-Type: application/json' -d '{\"request\":{\"method\":\"GET\",\"urlPath\":\"/transient\"},\"response\":{\"status\":200,\"body\":\"transient\"}}' http://wiremock:8080/__admin/mappings"
+  assert_success
+
+  # Confirm it's live.
+  run curl -sf -k "https://${PROJNAME}.ddev.site:8443/transient"
+  assert_success
+  assert_output --partial "transient"
+
+  # Reset (skip prompt).
+  run ddev wiremock-reset --yes
+  assert_success
+  assert_output --partial "WireMock reset"
+
+  # The runtime stub is gone.
+  run curl -sf -k "https://${PROJNAME}.ddev.site:8443/transient"
+  assert_failure
+
+  # The file-backed sample stub is reloaded automatically.
+  run curl -sf -k "https://${PROJNAME}.ddev.site:8443/sample"
+  assert_success
+  assert_output --partial "Hello from ddev-wiremock"
+}
+
+@test "wiremock-reset without --yes aborts when user says no" {
+  run bash -c 'echo n | ddev wiremock-reset'
+  assert_success
+  assert_output --partial "aborted"
+}
+
+@test "wiremock-reset --help prints usage" {
+  run ddev wiremock-reset --help
+  assert_success
+  assert_output --partial "Usage:"
+  assert_output --partial "--yes"
+}
