@@ -1,20 +1,23 @@
 #!/usr/bin/env bats
 
 # Run locally with:
-#   bats tests/test.bats --show-output-of-passing-tests --verbose-run
+#   bats tests/test.bats --print-output-on-failure
 # Filter a single test with:
 #   bats tests/test.bats --filter 'sample stub is served'
+#
+# Design:
+#   setup_file/teardown_file spin up a single throwaway DDEV project once
+#   for the whole file. Each test that mutates WireMock runtime state calls
+#   `ddev wiremock-reset --yes` in its setup, so tests stay independent
+#   without paying the full DDEV start/stop cost per test.
 
-setup() {
+setup_file() {
   set -eu -o pipefail
 
   export GITHUB_REPO=wazum/ddev-wiremock
 
   TEST_BREW_PREFIX="$(brew --prefix 2>/dev/null || true)"
   export BATS_LIB_PATH="${BATS_LIB_PATH:-}:${TEST_BREW_PREFIX}/lib:/usr/lib/bats"
-  bats_load_library bats-assert
-  bats_load_library bats-file
-  bats_load_library bats-support
 
   export DIR="$(cd "$(dirname "${BATS_TEST_FILENAME}")/.." >/dev/null 2>&1 && pwd)"
   export PROJNAME="test-$(basename "${GITHUB_REPO}")"
@@ -24,26 +27,46 @@ setup() {
   export DDEV_NONINTERACTIVE=true
   export DDEV_NO_INSTRUMENTATION=true
 
+  # Persist TESTDIR across tests (bats resets exports between tests otherwise).
+  echo "$TESTDIR" > "${BATS_FILE_TMPDIR}/testdir"
+
   ddev delete -Oy "${PROJNAME}" >/dev/null 2>&1 || true
 
   cd "${TESTDIR}"
-  run ddev config --project-name="${PROJNAME}" --project-tld=ddev.site --project-type=generic
-  assert_success
+  ddev config --project-name="${PROJNAME}" --project-tld=ddev.site --project-type=generic >/dev/null
 
   # Echo sidecar for recording tests - must be in .ddev/ before `ddev start`.
   cp "${DIR}/tests/echo/docker-compose.echo.yaml" .ddev/docker-compose.echo.yaml
 
-  run ddev add-on get "${DIR}"
-  assert_success
-
-  run ddev start -y
-  assert_success
+  ddev add-on get "${DIR}" >/dev/null
+  ddev start -y >/dev/null
 }
 
-teardown() {
-  cd "${HOME}"
-  ddev delete -Oy "${PROJNAME}" >/dev/null 2>&1 || true
-  rm -rf "${TESTDIR}"
+teardown_file() {
+  ddev delete -Oy "test-$(basename "wazum/ddev-wiremock")" >/dev/null 2>&1 || true
+  if [ -f "${BATS_FILE_TMPDIR}/testdir" ]; then
+    rm -rf "$(cat "${BATS_FILE_TMPDIR}/testdir")"
+  fi
+}
+
+setup() {
+  set -eu -o pipefail
+
+  TEST_BREW_PREFIX="$(brew --prefix 2>/dev/null || true)"
+  export BATS_LIB_PATH="${BATS_LIB_PATH:-}:${TEST_BREW_PREFIX}/lib:/usr/lib/bats"
+  bats_load_library bats-assert
+  bats_load_library bats-file
+  bats_load_library bats-support
+
+  export PROJNAME="test-$(basename "wazum/ddev-wiremock")"
+  export TESTDIR=$(cat "${BATS_FILE_TMPDIR}/testdir")
+  cd "${TESTDIR}"
+}
+
+# Helper: reset WireMock state. Use in tests that add runtime stubs or
+# issue requests that should not leak into later tests.
+reset_wiremock() {
+  ddev wiremock-reset --yes >/dev/null 2>&1 || true
 }
 
 @test "install places all project files" {
@@ -100,6 +123,7 @@ teardown() {
 }
 
 @test "wiremock-mappings lists stubs in compact form" {
+  reset_wiremock
   run ddev wiremock-mappings
   assert_success
   assert_output --partial "UUID"
@@ -132,6 +156,7 @@ teardown() {
 }
 
 @test "wiremock-requests shows recent journal entries after a request" {
+  reset_wiremock
   run curl -sf -k "https://${PROJNAME}.ddev.site:8443/sample"
   assert_success
 
@@ -146,6 +171,7 @@ teardown() {
 }
 
 @test "wiremock-requests marks unmatched requests in default output" {
+  reset_wiremock
   run curl -sf -k "https://${PROJNAME}.ddev.site:8443/never-stubbed-xyz" || true
 
   run ddev wiremock-requests --limit 50
@@ -155,6 +181,7 @@ teardown() {
 }
 
 @test "wiremock-requests --unmatched filters to unmatched" {
+  reset_wiremock
   run curl -sf -k "https://${PROJNAME}.ddev.site:8443/never-stubbed-path-xyz" || true
 
   run ddev wiremock-requests --unmatched
@@ -163,6 +190,7 @@ teardown() {
 }
 
 @test "wiremock-requests --json outputs full JSON" {
+  reset_wiremock
   run curl -sf -k "https://${PROJNAME}.ddev.site:8443/sample"
   assert_success
 
@@ -186,25 +214,22 @@ teardown() {
 }
 
 @test "wiremock-reset clears runtime stubs and journal but keeps file-backed stubs" {
+  reset_wiremock
   # Add a runtime-only stub.
   run ddev exec "curl -fsS -X POST -H 'Content-Type: application/json' -d '{\"request\":{\"method\":\"GET\",\"urlPath\":\"/transient\"},\"response\":{\"status\":200,\"body\":\"transient\"}}' http://wiremock:8080/__admin/mappings"
   assert_success
 
-  # Confirm it's live.
   run curl -sf -k "https://${PROJNAME}.ddev.site:8443/transient"
   assert_success
   assert_output --partial "transient"
 
-  # Reset (skip prompt).
   run ddev wiremock-reset --yes
   assert_success
   assert_output --partial "WireMock reset"
 
-  # The runtime stub is gone.
   run curl -sf -k "https://${PROJNAME}.ddev.site:8443/transient"
   assert_failure
 
-  # The file-backed sample stub is reloaded automatically.
   run curl -sf -k "https://${PROJNAME}.ddev.site:8443/sample"
   assert_success
   assert_output --partial "Hello from ddev-wiremock"
