@@ -1,0 +1,15 @@
+{
+  "id": "00000000-0000-0000-0000-000000000001",
+  "request": {
+    "method": "GET",
+    "urlPath": "/sample"
+  },
+  "response": {
+    "status": 200,
+    "headers": { "Content-Type": "application/json" },
+    "jsonBody": {
+      "message": "Hello from ddev-wiremock",
+      "path": "/sample"
+    }
+  }
+}
