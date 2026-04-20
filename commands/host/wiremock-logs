@@ -2,9 +2,15 @@
 #ddev-generated
 ## Description: Tail the WireMock container logs
 ## Usage: wiremock-logs [flags]
-## Example: ddev wiremock-logs -f
+## Example: "ddev wiremock-logs -f" or "ddev wiremock-logs --tail 100"
 
 set -euo pipefail
 
-echo "wiremock-logs: not implemented yet" >&2
-exit 1
+for arg in "$@"; do
+  if [ "$arg" = "-h" ] || [ "$arg" = "--help" ]; then
+    sed -n 's/^## //p' "$0"
+    exit 0
+  fi
+done
+
+exec ddev logs -s wiremock "$@"

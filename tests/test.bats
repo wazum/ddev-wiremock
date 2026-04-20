@@ -79,3 +79,22 @@ teardown() {
   assert_success
   assert_output --partial "Wiremock is ok"
 }
+
+@test "sample stub is served" {
+  run curl -sf -k "https://${PROJNAME}.ddev.site:8443/sample"
+  assert_success
+  assert_output --partial "Hello from ddev-wiremock"
+}
+
+@test "wiremock-logs prints WireMock container output" {
+  run ddev wiremock-logs
+  assert_success
+  assert_output --partial "WireMock"
+}
+
+@test "wiremock-logs --help prints usage" {
+  run ddev wiremock-logs --help
+  assert_success
+  assert_output --partial "Usage:"
+  assert_output --partial "wiremock-logs"
+}
