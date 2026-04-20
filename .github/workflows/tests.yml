@@ -1,0 +1,54 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bats:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install DDEV
+        run: |
+          sudo apt-get update
+          curl -fsSL https://pkg.ddev.com/apt/gpg.key | sudo gpg --dearmor -o /usr/share/keyrings/ddev.gpg
+          echo "deb [signed-by=/usr/share/keyrings/ddev.gpg] https://pkg.ddev.com/apt/ * *" | sudo tee /etc/apt/sources.list.d/ddev.list
+          sudo apt-get update
+          sudo apt-get install -y ddev
+          ddev version
+
+      - name: Install mkcert so HTTPS certs are trusted
+        run: |
+          sudo apt-get install -y libnss3-tools
+          curl -fsSL -o mkcert "https://github.com/FiloSottile/mkcert/releases/download/v1.4.4/mkcert-v1.4.4-linux-amd64"
+          chmod +x mkcert
+          sudo mv mkcert /usr/local/bin/
+          mkcert -install
+
+      - name: Install bats-core and libraries
+        run: |
+          sudo apt-get install -y bats
+          sudo mkdir -p /usr/lib/bats
+          for lib in bats-assert bats-file bats-support; do
+            sudo git clone --depth 1 "https://github.com/bats-core/${lib}.git" "/usr/lib/bats/${lib}"
+          done
+
+      - name: Register test hostname
+        run: echo "127.0.0.1 test-ddev-wiremock.ddev.site" | sudo tee -a /etc/hosts
+
+      - name: Run bats tests
+        run: bats tests/test.bats --print-output-on-failure
+        env:
+          DDEV_NONINTERACTIVE: "true"
+          DDEV_NO_INSTRUMENTATION: "true"
