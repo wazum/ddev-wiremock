@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+#ddev-generated
+## Description: Stop recording and print the count of stubs written
+## Usage: wiremock-record-stop
+## Example: ddev wiremock-record-stop
+
+set -euo pipefail
+
+echo "wiremock-record-stop: not implemented yet" >&2
+exit 1

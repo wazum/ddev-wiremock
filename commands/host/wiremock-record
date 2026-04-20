@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+#ddev-generated
+## Description: Start recording upstream API calls as WireMock stubs
+## Usage: wiremock-record <upstream-url>
+## Example: ddev wiremock-record https://api.example.com
+
+set -euo pipefail
+
+echo "wiremock-record: not implemented yet" >&2
+exit 1

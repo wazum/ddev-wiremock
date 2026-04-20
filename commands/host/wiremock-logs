@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+#ddev-generated
+## Description: Tail the WireMock container logs
+## Usage: wiremock-logs [flags]
+## Example: ddev wiremock-logs -f
+
+set -euo pipefail
+
+echo "wiremock-logs: not implemented yet" >&2
+exit 1

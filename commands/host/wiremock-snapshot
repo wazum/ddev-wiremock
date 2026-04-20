@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+#ddev-generated
+## Description: Convert the current WireMock request journal into persisted stubs
+## Usage: wiremock-snapshot
+## Example: ddev wiremock-snapshot
+
+set -euo pipefail
+
+echo "wiremock-snapshot: not implemented yet" >&2
+exit 1

@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+#ddev-generated
+## Description: Reset WireMock runtime state (mappings and request journal)
+## Usage: wiremock-reset [--yes]
+## Example: ddev wiremock-reset
+
+set -euo pipefail
+
+echo "wiremock-reset: not implemented yet" >&2
+exit 1

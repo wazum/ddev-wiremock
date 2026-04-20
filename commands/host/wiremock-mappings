@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+#ddev-generated
+## Description: List active WireMock stub mappings
+## Usage: wiremock-mappings [--id <uuid>]
+## Example: ddev wiremock-mappings
+
+set -euo pipefail
+
+echo "wiremock-mappings: not implemented yet" >&2
+exit 1
