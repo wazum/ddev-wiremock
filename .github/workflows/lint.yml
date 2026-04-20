@@ -1,0 +1,55 @@
+name: lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  yaml:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check YAML files parse
+        run: |
+          set -e
+          for f in install.yaml docker-compose.wiremock.yaml; do
+            echo "checking $f"
+            python3 -c "import sys, yaml; yaml.safe_load(open(sys.argv[1]))" "$f"
+          done
+
+  json:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check JSON stub files parse
+        run: |
+          set -e
+          find wiremock/mappings -name '*.json' -type f | while read -r f; do
+            echo "checking $f"
+            python3 -m json.tool "$f" > /dev/null
+          done
+
+  shell:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - name: Run shellcheck on host commands
+        run: |
+          set -e
+          if [ -d commands/host ]; then
+            find commands/host -type f | while read -r f; do
+              echo "checking $f"
+              shellcheck -x "$f"
+            done
+          else
+            echo "no commands/host yet, skipping"
+          fi
