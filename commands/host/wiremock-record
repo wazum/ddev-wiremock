@@ -2,9 +2,57 @@
 #ddev-generated
 ## Description: Start recording upstream API calls as WireMock stubs
 ## Usage: wiremock-record <upstream-url>
-## Example: ddev wiremock-record https://api.example.com
+## Example: "ddev wiremock-record https://api.example.com"
+##
+## Routes requests to WireMock through to the upstream and writes a stub for
+## each response. Issue your app's requests against WireMock's public URL,
+## then run 'ddev wiremock-record-stop' to persist the stubs.
 
 set -euo pipefail
 
-echo "wiremock-record: not implemented yet" >&2
-exit 1
+for arg in "$@"; do
+  if [ "$arg" = "-h" ] || [ "$arg" = "--help" ]; then
+    sed -n 's/^## //p' "$0"
+    exit 0
+  fi
+done
+
+if [ $# -lt 1 ]; then
+  echo "error: missing upstream URL." >&2
+  echo "Usage: ddev wiremock-record <upstream-url>" >&2
+  exit 2
+fi
+
+if [ $# -gt 1 ]; then
+  echo "error: too many arguments." >&2
+  echo "Usage: ddev wiremock-record <upstream-url>" >&2
+  exit 2
+fi
+
+upstream="$1"
+
+body=$(cat <<JSON
+{
+  "targetBaseUrl": "${upstream}",
+  "persist": true,
+  "captureHeaders": {
+    "Accept": {},
+    "Authorization": {}
+  },
+  "repeatsAsScenarios": false
+}
+JSON
+)
+
+if ! ddev exec "curl -fsS -X POST -H 'Content-Type: application/json' -d '${body}' http://wiremock:8080/__admin/recordings/start" >/dev/null 2>&1; then
+  echo "error: WireMock not reachable or recording start failed." >&2
+  echo "Check 'ddev describe' and 'ddev wiremock-logs'." >&2
+  exit 1
+fi
+
+hostname=$(ddev describe -j 2>/dev/null | docker run -i --rm ddev/ddev-utilities jq -r '.raw.hostname // ""' 2>/dev/null || true)
+https_port=$(grep '^WIREMOCK_HTTPS_PORT=' .ddev/.env.wiremock 2>/dev/null | cut -d= -f2 | tr -d '"' || echo 8443)
+public_url="https://${hostname:-<project>.ddev.site}:${https_port:-8443}"
+
+echo "Recording started against ${upstream}."
+echo "Issue requests through ${public_url}, then run: ddev wiremock-record-stop"

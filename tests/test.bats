@@ -247,3 +247,52 @@ reset_wiremock() {
   assert_output --partial "Usage:"
   assert_output --partial "--yes"
 }
+
+@test "wiremock-record without an upstream URL fails with usage" {
+  run ddev wiremock-record
+  assert_failure
+  assert_output --partial "missing upstream URL"
+}
+
+@test "wiremock-record rejects extra arguments" {
+  run ddev wiremock-record http://echo:8080 extra
+  assert_failure
+  assert_output --partial "too many"
+}
+
+@test "wiremock-record and wiremock-record-stop capture stubs from the echo sidecar" {
+  reset_wiremock
+  # Count existing stub files so we can diff.
+  before=$(ls .ddev/wiremock/mappings/*.json 2>/dev/null | wc -l | tr -d ' ')
+
+  run ddev wiremock-record http://echo:8080
+  assert_success
+  assert_output --partial "Recording started"
+  assert_output --partial "http://echo:8080"
+
+  # Issue a request through WireMock - it proxies to echo and records it.
+  run curl -sf -k -H "X-Record-Test: true" "https://${PROJNAME}.ddev.site:8443/recorded-path"
+  assert_success
+
+  run ddev wiremock-record-stop
+  assert_success
+  assert_output --partial "Recording stopped"
+  assert_output --partial "stubs written"
+
+  # At least one new stub file was created.
+  after=$(ls .ddev/wiremock/mappings/*.json 2>/dev/null | wc -l | tr -d ' ')
+  [ "$after" -gt "$before" ]
+}
+
+@test "wiremock-record --help prints usage" {
+  run ddev wiremock-record --help
+  assert_success
+  assert_output --partial "Usage:"
+  assert_output --partial "upstream-url"
+}
+
+@test "wiremock-record-stop --help prints usage" {
+  run ddev wiremock-record-stop --help
+  assert_success
+  assert_output --partial "Usage:"
+}
