@@ -1,0 +1,15 @@
+# macOS
+.DS_Store
+
+# Editor
+.idea/
+.vscode/
+*.swp
+
+# Local test artefacts
+tests/.bats-cache/
+tmp/
+
+CLAUDE.md
+.claude/
+docs/
