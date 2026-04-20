@@ -1,10 +1,89 @@
 #!/usr/bin/env bash
 #ddev-generated
 ## Description: List active WireMock stub mappings
-## Usage: wiremock-mappings [--id <uuid>]
-## Example: ddev wiremock-mappings
+## Usage: wiremock-mappings [--json | --id <uuid>]
+## Example: "ddev wiremock-mappings"
+## Example: "ddev wiremock-mappings --id <uuid-from-default-listing>"
+## Example: "ddev wiremock-mappings --json | jq '.mappings[0]'"
 
 set -euo pipefail
 
-echo "wiremock-mappings: not implemented yet" >&2
-exit 1
+format=compact
+id=""
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --id)
+      shift
+      id="${1:-}"
+      if [ -z "$id" ]; then
+        echo "error: --id requires a uuid argument." >&2
+        exit 2
+      fi
+      format=single
+      ;;
+    --json)
+      format=json
+      ;;
+    -h|--help)
+      sed -n 's/^## //p' "$0"
+      exit 0
+      ;;
+    *)
+      echo "error: unknown argument: $1" >&2
+      echo "Try: ddev wiremock-mappings --help" >&2
+      exit 2
+      ;;
+  esac
+  shift
+done
+
+case "$format" in
+  single)
+    if ! output=$(ddev exec "curl -fsS http://wiremock:8080/__admin/mappings/${id} | jq ." 2>&1); then
+      echo "error: stub not found or WireMock not reachable." >&2
+      echo "Run 'ddev wiremock-mappings' to see available UUIDs." >&2
+      exit 1
+    fi
+    printf '%s\n' "$output"
+    ;;
+  json)
+    if ! output=$(ddev exec "curl -fsS http://wiremock:8080/__admin/mappings | jq ." 2>&1); then
+      echo "error: WireMock not reachable." >&2
+      echo "Check 'ddev describe' and 'ddev wiremock-logs'." >&2
+      exit 1
+    fi
+    printf '%s\n' "$output"
+    ;;
+  compact)
+    jq_expr='.mappings
+      | sort_by(.request.method, (.request.urlPath // .request.url // .request.urlPathPattern // .request.urlPattern // ""))
+      | .[]
+      | [
+          .id,
+          (.request.method // "ANY"),
+          (.request.urlPath // .request.url // .request.urlPathPattern // .request.urlPattern // "/"),
+          (.name // "")
+        ]
+      | @tsv'
+    if ! tsv=$(ddev exec "curl -fsS http://wiremock:8080/__admin/mappings | jq -r '${jq_expr}'" 2>&1); then
+      echo "error: WireMock not reachable." >&2
+      echo "Check 'ddev describe' and 'ddev wiremock-logs'." >&2
+      exit 1
+    fi
+    if [ -z "$tsv" ]; then
+      echo "No stubs loaded."
+      echo "Add JSON files under .ddev/wiremock/mappings/ or use 'ddev wiremock-record'."
+      exit 0
+    fi
+    # Pretty-print: UUID (36), METHOD (7), URL (rest), optional name in parens.
+    printf '%-36s  %-7s  %s\n' "UUID" "METHOD" "URL"
+    while IFS=$'\t' read -r uuid method url name; do
+      if [ -n "$name" ]; then
+        printf '%-36s  %-7s  %s  (%s)\n' "$uuid" "$method" "$url" "$name"
+      else
+        printf '%-36s  %-7s  %s\n' "$uuid" "$method" "$url"
+      fi
+    done <<< "$tsv"
+    ;;
+esac

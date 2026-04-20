@@ -98,3 +98,35 @@ teardown() {
   assert_output --partial "Usage:"
   assert_output --partial "wiremock-logs"
 }
+
+@test "wiremock-mappings lists stubs in compact form" {
+  run ddev wiremock-mappings
+  assert_success
+  assert_output --partial "UUID"
+  assert_output --partial "METHOD"
+  assert_output --partial "00000000-0000-0000-0000-000000000001"
+  assert_output --partial "GET"
+  assert_output --partial "/sample"
+}
+
+@test "wiremock-mappings --json outputs full JSON" {
+  run ddev wiremock-mappings --json
+  assert_success
+  assert_output --partial '"mappings"'
+  assert_output --partial "00000000-0000-0000-0000-000000000001"
+}
+
+@test "wiremock-mappings --id fetches a single stub as JSON" {
+  run ddev wiremock-mappings --id 00000000-0000-0000-0000-000000000001
+  assert_success
+  assert_output --partial "Hello from ddev-wiremock"
+  assert_output --partial '"status": 200'
+}
+
+@test "wiremock-mappings --help prints usage" {
+  run ddev wiremock-mappings --help
+  assert_success
+  assert_output --partial "Usage:"
+  assert_output --partial "--id"
+  assert_output --partial "--json"
+}
