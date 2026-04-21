@@ -71,6 +71,7 @@ reset_wiremock() {
 
 @test "install places all project files" {
   assert_file_exist .ddev/docker-compose.wiremock.yaml
+  assert_file_exist .ddev/config.wiremock.yaml
   assert_file_exist .ddev/wiremock/mappings/sample.json
   assert_file_exist .ddev/wiremock/mappings/.gitkeep
   assert_file_exist .ddev/wiremock/__files/.gitkeep
@@ -83,6 +84,19 @@ reset_wiremock() {
   assert_file_exist .ddev/commands/host/wiremock-record-stop
   assert_file_exist .ddev/commands/host/wiremock-snapshot
   assert_file_exist .ddev/.env.wiremock
+}
+
+@test "install writes addon manifest" {
+  assert_file_exist .ddev/addon-metadata/wiremock/manifest.yaml
+  run grep "name: wiremock" .ddev/addon-metadata/wiremock/manifest.yaml
+  assert_success
+}
+
+@test "web container has DDEV_WIREMOCK_* env vars" {
+  run ddev exec "env | grep -E '^DDEV_WIREMOCK_'"
+  assert_success
+  assert_output --partial "DDEV_WIREMOCK_URL=http://wiremock:8080"
+  assert_output --partial "DDEV_WIREMOCK_ADMIN_URL=http://wiremock:8080/__admin"
 }
 
 @test "wiremock service starts" {

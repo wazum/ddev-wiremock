@@ -1,0 +1,4 @@
+#ddev-generated
+web_environment:
+  - DDEV_WIREMOCK_URL=http://wiremock:8080
+  - DDEV_WIREMOCK_ADMIN_URL=http://wiremock:8080/__admin
