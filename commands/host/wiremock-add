@@ -1,0 +1,148 @@
+#!/usr/bin/env bash
+#ddev-generated
+## Description: Scaffold a new stub JSON file under .ddev/wiremock/mappings/
+## Usage: wiremock-add <METHOD> <PATH> [--status N] [--body JSON] [--content-type TYPE] [--force]
+## Example: "ddev wiremock-add GET /users/42"
+## Example: "ddev wiremock-add POST /users --status 201"
+## Example: "ddev wiremock-add GET /users/42 --body '{\"id\":42,\"name\":\"Alice\"}'"
+## Example: "ddev wiremock-add GET /missing --status 404 --body '{\"error\":\"not found\"}'"
+##
+## Writes an exact-match stub. For regex paths or advanced features edit
+## the JSON file afterwards; see https://wiremock.org/docs/stubbing/.
+## Run 'ddev wiremock-reload' afterwards so the service picks it up.
+
+set -euo pipefail
+
+status=200
+body=""
+content_type="application/json"
+force=false
+method=""
+url_path=""
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --status)
+      shift
+      status="${1:-}"
+      if ! [[ "$status" =~ ^[1-5][0-9]{2}$ ]]; then
+        echo "error: --status requires an HTTP status code (100-599)." >&2
+        exit 2
+      fi
+      ;;
+    --body)
+      shift
+      body="${1:-}"
+      ;;
+    --content-type)
+      shift
+      content_type="${1:-}"
+      if [ -z "$content_type" ]; then
+        echo "error: --content-type requires a value." >&2
+        exit 2
+      fi
+      ;;
+    --force)
+      force=true
+      ;;
+    -h|--help)
+      sed -n 's/^## //p' "$0"
+      exit 0
+      ;;
+    -*)
+      echo "error: unknown option: $1" >&2
+      echo "Try: ddev wiremock-add --help" >&2
+      exit 2
+      ;;
+    *)
+      if [ -z "$method" ]; then
+        method="$1"
+      elif [ -z "$url_path" ]; then
+        url_path="$1"
+      else
+        echo "error: unexpected argument: $1" >&2
+        echo "Usage: ddev wiremock-add <METHOD> <PATH> [options]" >&2
+        exit 2
+      fi
+      ;;
+  esac
+  shift
+done
+
+if [ -z "$method" ] || [ -z "$url_path" ]; then
+  echo "error: METHOD and PATH are required." >&2
+  echo "Usage: ddev wiremock-add <METHOD> <PATH> [options]" >&2
+  exit 2
+fi
+
+method_upper=$(printf '%s' "$method" | tr '[:lower:]' '[:upper:]')
+case "$method_upper" in
+  GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|ANY) ;;
+  *)
+    echo "error: unsupported method: $method" >&2
+    echo "Supported: GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS, ANY." >&2
+    exit 2
+    ;;
+esac
+
+case "$url_path" in
+  /*) ;;
+  *)
+    echo "error: PATH must start with '/'. Got: $url_path" >&2
+    exit 2
+    ;;
+esac
+
+method_lower=$(printf '%s' "$method_upper" | tr '[:upper:]' '[:lower:]')
+path_slug=$(printf '%s' "${url_path#/}" | sed -e 's/[^a-zA-Z0-9._-]/-/g' -e 's/--*/-/g' -e 's/^-//' -e 's/-$//')
+if [ -z "$path_slug" ]; then
+  path_slug="root"
+fi
+filename="${method_lower}-${path_slug}.json"
+target=".ddev/wiremock/mappings/${filename}"
+
+if [ ! -d ".ddev/wiremock/mappings" ]; then
+  echo "error: .ddev/wiremock/mappings/ not found. Is the add-on installed?" >&2
+  exit 1
+fi
+
+if [ -f "$target" ] && [ "$force" != true ]; then
+  echo "error: stub already exists: $target" >&2
+  echo "Use --force to overwrite, or pick a different path." >&2
+  exit 1
+fi
+
+# Validate --body as JSON (if provided) and build the response object.
+if [ -n "$body" ]; then
+  if ! printf '%s' "$body" | python3 -c "import json,sys; json.load(sys.stdin)" >/dev/null 2>&1; then
+    echo "error: --body must be valid JSON." >&2
+    echo "Got: $body" >&2
+    exit 2
+  fi
+  body_field="jsonBody"
+  body_value="$body"
+else
+  body_field="jsonBody"
+  body_value="{}"
+fi
+
+python3 - "$target" "$method_upper" "$url_path" "$status" "$content_type" "$body_field" "$body_value" <<'PY'
+import json
+import sys
+
+target, method, url_path, status, content_type, body_field, body_value = sys.argv[1:]
+stub = {
+    "request": {"method": method, "urlPath": url_path},
+    "response": {
+        "status": int(status),
+        "headers": {"Content-Type": content_type},
+        body_field: json.loads(body_value),
+    },
+}
+with open(target, "w") as fp:
+    json.dump(stub, fp, indent=2)
+    fp.write("\n")
+PY
+
+echo "Wrote ${target}"
+echo "Run 'ddev wiremock-reload' to activate the stub."

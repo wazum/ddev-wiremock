@@ -9,12 +9,14 @@ project_files:
   - wiremock/mappings/.gitkeep
   - wiremock/__files/.gitkeep
   - wiremock/README.md
-  - commands/host/wiremock-reset
-  - commands/host/wiremock-mappings
-  - commands/host/wiremock-requests
+  - commands/host/wiremock-add
   - commands/host/wiremock-logs
+  - commands/host/wiremock-mappings
   - commands/host/wiremock-record
   - commands/host/wiremock-record-stop
+  - commands/host/wiremock-reload
+  - commands/host/wiremock-requests
+  - commands/host/wiremock-reset
   - commands/host/wiremock-snapshot
 
 post_install_actions:

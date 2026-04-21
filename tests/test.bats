@@ -76,12 +76,14 @@ reset_wiremock() {
   assert_file_exist .ddev/wiremock/mappings/.gitkeep
   assert_file_exist .ddev/wiremock/__files/.gitkeep
   assert_file_exist .ddev/wiremock/README.md
-  assert_file_exist .ddev/commands/host/wiremock-reset
-  assert_file_exist .ddev/commands/host/wiremock-mappings
-  assert_file_exist .ddev/commands/host/wiremock-requests
+  assert_file_exist .ddev/commands/host/wiremock-add
   assert_file_exist .ddev/commands/host/wiremock-logs
+  assert_file_exist .ddev/commands/host/wiremock-mappings
   assert_file_exist .ddev/commands/host/wiremock-record
   assert_file_exist .ddev/commands/host/wiremock-record-stop
+  assert_file_exist .ddev/commands/host/wiremock-reload
+  assert_file_exist .ddev/commands/host/wiremock-requests
+  assert_file_exist .ddev/commands/host/wiremock-reset
   assert_file_exist .ddev/commands/host/wiremock-snapshot
   assert_file_exist .ddev/.env.wiremock
 }
@@ -355,6 +357,105 @@ reset_wiremock() {
 
 @test "wiremock-snapshot --help prints usage" {
   run ddev wiremock-snapshot --help
+  assert_success
+  assert_output --partial "Usage:"
+}
+
+@test "wiremock-add writes a stub and wiremock-reload makes it live" {
+  reset_wiremock
+  rm -f .ddev/wiremock/mappings/get-added-stub.json
+
+  run ddev wiremock-add GET /added/stub
+  assert_success
+  assert_output --partial "Wrote"
+  assert_file_exist .ddev/wiremock/mappings/get-added-stub.json
+
+  run ddev wiremock-reload
+  assert_success
+  assert_output --partial "reloaded"
+
+  run curl -s -k -w '\n%{http_code}' "https://${PROJECT_NAME}.ddev.site:8443/added/stub"
+  assert_success
+  assert_output --partial "200"
+
+  rm -f .ddev/wiremock/mappings/get-added-stub.json
+}
+
+@test "wiremock-add honours --status and --body" {
+  reset_wiremock
+  rm -f .ddev/wiremock/mappings/post-items.json
+
+  run ddev wiremock-add POST /items --status 201 --body '{"id":99}'
+  assert_success
+  assert_file_exist .ddev/wiremock/mappings/post-items.json
+
+  run cat .ddev/wiremock/mappings/post-items.json
+  assert_success
+  assert_output --partial '"status": 201'
+  assert_output --partial '"id": 99'
+
+  ddev wiremock-reload >/dev/null
+  run curl -s -k -X POST -w '\n%{http_code}' "https://${PROJECT_NAME}.ddev.site:8443/items"
+  assert_success
+  assert_output --partial "201"
+  assert_output --partial '"id":99'
+
+  rm -f .ddev/wiremock/mappings/post-items.json
+}
+
+@test "wiremock-add refuses to overwrite without --force" {
+  reset_wiremock
+  rm -f .ddev/wiremock/mappings/get-duplicate.json
+
+  run ddev wiremock-add GET /duplicate
+  assert_success
+
+  run ddev wiremock-add GET /duplicate
+  assert_failure
+  assert_output --partial "already exists"
+
+  run ddev wiremock-add GET /duplicate --force --body '{"v":2}'
+  assert_success
+  run cat .ddev/wiremock/mappings/get-duplicate.json
+  assert_output --partial '"v": 2'
+
+  rm -f .ddev/wiremock/mappings/get-duplicate.json
+}
+
+@test "wiremock-add rejects invalid JSON bodies" {
+  run ddev wiremock-add GET /bad --body 'not-json'
+  assert_failure
+  assert_output --partial "must be valid JSON"
+}
+
+@test "wiremock-add rejects unsupported HTTP methods" {
+  run ddev wiremock-add FROBNICATE /x
+  assert_failure
+  assert_output --partial "unsupported method"
+}
+
+@test "wiremock-add requires method and path" {
+  run ddev wiremock-add
+  assert_failure
+  assert_output --partial "required"
+}
+
+@test "wiremock-add --help prints usage" {
+  run ddev wiremock-add --help
+  assert_success
+  assert_output --partial "Usage:"
+  assert_output --partial "--status"
+  assert_output --partial "--body"
+}
+
+@test "wiremock-reload rejects extra arguments" {
+  run ddev wiremock-reload extra
+  assert_failure
+  assert_output --partial "unexpected argument"
+}
+
+@test "wiremock-reload --help prints usage" {
+  run ddev wiremock-reload --help
   assert_success
   assert_output --partial "Usage:"
 }

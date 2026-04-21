@@ -23,10 +23,12 @@ Point your app's HTTP client at WireMock instead of the real upstream. In
 the DDEV web container use `$DDEV_WIREMOCK_URL` (`http://wiremock:8080`);
 from the host or a browser use `https://<project>.ddev.site:8443`.
 
-Then add stubs one of two ways:
+Then add stubs one of three ways:
 
+- **Scaffold quickly** - `ddev wiremock-add GET /users/42` writes a stub
+  JSON file; `ddev wiremock-reload` makes it live without a restart.
 - **Author by hand** - drop JSON files into `.ddev/wiremock/mappings/`.
-  See `sample.json` there for the shape.
+  See `sample.json` there for the shape, then run `ddev wiremock-reload`.
 - **Record from a live upstream** - see [Recording](#recording) below.
 
 Every request your app makes to the WireMock URL is matched against a
@@ -38,10 +40,12 @@ request to the configured upstream and persists the result as a new stub.
 
 | Command | What it does |
 |---|---|
+| `ddev wiremock-add <METHOD> <PATH>` | Scaffold a new stub JSON file. `--status N`, `--body JSON`, `--content-type TYPE`, `--force`. |
+| `ddev wiremock-reload` | Re-read stub files from disk without restarting. Keeps the request journal. |
 | `ddev wiremock-mappings` | List active stubs. `--id <uuid>` fetches one, `--json` dumps full JSON. |
 | `ddev wiremock-requests` | Show the request journal. `--limit N`, `--unmatched`, `--json`. |
 | `ddev wiremock-logs` | Tail the WireMock container logs. Passes flags through to `ddev logs`. |
-| `ddev wiremock-reset` | Wipe runtime stubs and the request journal. File-backed stubs reload on next start. |
+| `ddev wiremock-reset` | Wipe runtime stubs and the request journal. File-backed stubs reload automatically. |
 | `ddev wiremock-record <url>` | Start recording against an upstream URL. |
 | `ddev wiremock-record-stop` | Stop recording; writes stubs into `mappings/`. |
 | `ddev wiremock-snapshot` | Convert the current journal into stubs (no upstream needed). |

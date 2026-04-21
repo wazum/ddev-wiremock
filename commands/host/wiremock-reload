@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+#ddev-generated
+## Description: Reload stub mappings from .ddev/wiremock/mappings/ without restarting the container
+## Usage: wiremock-reload
+## Example: "ddev wiremock-reload"
+##
+## Drops runtime-added stubs and re-reads files on disk. The request
+## journal is kept. Use this after editing stub JSON by hand or running
+## 'ddev wiremock-add'.
+
+set -euo pipefail
+
+for arg in "$@"; do
+  if [ "$arg" = "-h" ] || [ "$arg" = "--help" ]; then
+    sed -n 's/^## //p' "$0"
+    exit 0
+  fi
+done
+
+if [ $# -gt 0 ]; then
+  echo "error: unexpected argument: $1" >&2
+  echo "Usage: ddev wiremock-reload" >&2
+  exit 2
+fi
+
+if ! ddev exec "curl -fsS -X POST http://wiremock:8080/__admin/mappings/reset" >/dev/null 2>&1; then
+  echo "error: WireMock not reachable or reload failed." >&2
+  echo "Check 'ddev describe' and 'ddev wiremock-logs'." >&2
+  exit 1
+fi
+
+echo "Stubs reloaded from .ddev/wiremock/mappings/."
