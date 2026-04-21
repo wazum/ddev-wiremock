@@ -44,11 +44,13 @@ jobs:
             sudo git clone --depth 1 "https://github.com/bats-core/${lib}.git" "/usr/lib/bats/${lib}"
           done
 
-      - name: Register test hostname
-        run: echo "127.0.0.1 test-ddev-wiremock.ddev.site" | sudo tee -a /etc/hosts
+      - name: Register test hostnames
+        run: |
+          echo "127.0.0.1 test-ddev-wiremock.ddev.site" | sudo tee -a /etc/hosts
+          echo "127.0.0.1 test-ddev-wiremock-removal.ddev.site" | sudo tee -a /etc/hosts
 
       - name: Run bats tests
-        run: bats tests/test.bats --print-output-on-failure
+        run: bats tests/ --print-output-on-failure
         env:
           DDEV_NONINTERACTIVE: "true"
           DDEV_NO_INSTRUMENTATION: "true"
