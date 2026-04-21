@@ -17,6 +17,23 @@ ddev restart
 WireMock is then reachable at `https://<project>.ddev.site:8443` with the
 admin API under `/__admin`. Stubs live under `.ddev/wiremock/mappings/`.
 
+## Getting started
+
+Point your app's HTTP client at WireMock instead of the real upstream. In
+the DDEV web container use `$DDEV_WIREMOCK_URL` (`http://wiremock:8080`);
+from the host or a browser use `https://<project>.ddev.site:8443`.
+
+Then add stubs one of two ways:
+
+- **Author by hand** - drop JSON files into `.ddev/wiremock/mappings/`.
+  See `sample.json` there for the shape.
+- **Record from a live upstream** - see [Recording](#recording) below.
+
+Every request your app makes to the WireMock URL is matched against a
+stub. On a match, WireMock serves the stub response. On a miss, WireMock
+answers with 404 - unless you are recording, in which case it proxies the
+request to the configured upstream and persists the result as a new stub.
+
 ## Commands
 
 | Command | What it does |
@@ -31,25 +48,61 @@ admin API under `/__admin`. Stubs live under `.ddev/wiremock/mappings/`.
 
 All commands take `--help`.
 
-## Stubs
+## Stubs and the request journal
 
-Stub files live in `.ddev/wiremock/mappings/` (one JSON per stub), response
-bodies in `.ddev/wiremock/__files/`. Everything there is committed - stubs
-are shared team state.
+**Stubs** are JSON files that tell WireMock how to respond to requests.
+Each file describes one match (method, URL pattern, headers, body) and
+the response to return. They live in `.ddev/wiremock/mappings/`, with
+response bodies in `.ddev/wiremock/__files/`. Everything there is
+committed - stubs are shared team state.
 
 Stub syntax: <https://wiremock.org/docs/stubbing/>.
 
+**The request journal** is an in-memory log of every HTTP call WireMock
+has received during the current run: method, URL, headers, body, which
+stub matched, and the response returned. `ddev wiremock-requests` reads
+it; `ddev wiremock-snapshot` persists it as stubs. The journal clears on
+`ddev wiremock-reset` and on container restart.
+
 ## Recording
 
-```bash
-ddev wiremock-record https://api.example.com
-# issue requests through https://<project>.ddev.site:8443 ...
-ddev wiremock-record-stop
-git diff .ddev/wiremock/mappings/
-```
+WireMock can capture stubs from live upstream responses. Point it at the
+real API, make the calls you want to capture, and WireMock writes a stub
+for each response.
 
-`ddev wiremock-snapshot` does the same after the fact, using only the
-current request journal.
+1. Start recording:
+
+   ```bash
+   ddev wiremock-record https://api.example.com
+   ```
+
+2. Issue the requests you want to record. Anything that hits WireMock and
+   doesn't match an existing stub is forwarded to the upstream, and
+   WireMock writes a new stub from the response. Pick whichever fits:
+
+   ```bash
+   # by hand from the host
+   curl -k "https://<project>.ddev.site:8443/users/42"
+
+   # from inside the web container (DDEV_WIREMOCK_URL is injected there)
+   ddev exec "curl $DDEV_WIREMOCK_URL/users/42"
+
+   # or run your app's integration tests - as long as its HTTP client is
+   # configured to call WireMock's URL instead of the real API, every
+   # request flows through.
+   ```
+
+3. Stop recording and review the new stub files:
+
+   ```bash
+   ddev wiremock-record-stop
+   git diff .ddev/wiremock/mappings/
+   ```
+
+`ddev wiremock-snapshot` is the after-the-fact variant: if WireMock has
+already been serving requests (for example, against a proxy stub you set
+up manually), it dumps the current request journal into stub files in one
+call - no upstream URL needed.
 
 ## Environment and configuration
 
