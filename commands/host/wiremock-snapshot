@@ -1,10 +1,35 @@
 #!/usr/bin/env bash
 #ddev-generated
-## Description: Convert the current WireMock request journal into persisted stubs
+## Description: Persist the current WireMock request journal as stubs
 ## Usage: wiremock-snapshot
-## Example: ddev wiremock-snapshot
+## Example: "ddev wiremock-snapshot"
+##
+## Converts every entry in the current request journal into a stub file
+## under .ddev/wiremock/mappings/. Useful when requests have already been
+## made without active recording (for example, against a live proxy).
 
 set -euo pipefail
 
-echo "wiremock-snapshot: not implemented yet" >&2
-exit 1
+for arg in "$@"; do
+  if [ "$arg" = "-h" ] || [ "$arg" = "--help" ]; then
+    sed -n 's/^## //p' "$0"
+    exit 0
+  fi
+done
+
+if [ $# -gt 0 ]; then
+  echo "error: unexpected argument: $1" >&2
+  echo "Usage: ddev wiremock-snapshot" >&2
+  exit 2
+fi
+
+body='{"outputFormat":"full","persist":true,"captureHeaders":{"Accept":{},"Authorization":{}}}'
+
+if ! count=$(ddev exec "curl -fsS -X POST -H 'Content-Type: application/json' -d '${body}' http://wiremock:8080/__admin/recordings/snapshot | jq '.mappings | length'" 2>&1); then
+  echo "error: WireMock not reachable or snapshot failed." >&2
+  echo "Check 'ddev describe' and 'ddev wiremock-logs'." >&2
+  exit 1
+fi
+
+echo "Snapshot complete. ${count} stubs written to .ddev/wiremock/mappings/."
+echo "Review 'git diff .ddev/wiremock/mappings/' before committing."

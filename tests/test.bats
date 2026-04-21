@@ -20,20 +20,20 @@ setup_file() {
   export BATS_LIB_PATH="${BATS_LIB_PATH:-}:${TEST_BREW_PREFIX}/lib:/usr/lib/bats"
 
   export DIR="$(cd "$(dirname "${BATS_TEST_FILENAME}")/.." >/dev/null 2>&1 && pwd)"
-  export PROJNAME="test-$(basename "${GITHUB_REPO}")"
+  export PROJECT_NAME="test-$(basename "${GITHUB_REPO}")"
 
   mkdir -p ~/tmp
-  export TESTDIR=$(mktemp -d ~/tmp/${PROJNAME}.XXXXXX)
+  export TEST_DIR=$(mktemp -d ~/tmp/${PROJECT_NAME}.XXXXXX)
   export DDEV_NONINTERACTIVE=true
   export DDEV_NO_INSTRUMENTATION=true
 
-  # Persist TESTDIR across tests (bats resets exports between tests otherwise).
-  echo "$TESTDIR" > "${BATS_FILE_TMPDIR}/testdir"
+  # Persist TEST_DIR across tests (bats resets exports between tests otherwise).
+  echo "$TEST_DIR" > "${BATS_FILE_TMPDIR}/test_dir"
 
-  ddev delete -Oy "${PROJNAME}" >/dev/null 2>&1 || true
+  ddev delete -Oy "${PROJECT_NAME}" >/dev/null 2>&1 || true
 
-  cd "${TESTDIR}"
-  ddev config --project-name="${PROJNAME}" --project-tld=ddev.site --project-type=generic >/dev/null
+  cd "${TEST_DIR}"
+  ddev config --project-name="${PROJECT_NAME}" --project-tld=ddev.site --project-type=generic >/dev/null
 
   # Echo sidecar for recording tests - must be in .ddev/ before `ddev start`.
   cp "${DIR}/tests/echo/docker-compose.echo.yaml" .ddev/docker-compose.echo.yaml
@@ -44,8 +44,8 @@ setup_file() {
 
 teardown_file() {
   ddev delete -Oy "test-$(basename "wazum/ddev-wiremock")" >/dev/null 2>&1 || true
-  if [ -f "${BATS_FILE_TMPDIR}/testdir" ]; then
-    rm -rf "$(cat "${BATS_FILE_TMPDIR}/testdir")"
+  if [ -f "${BATS_FILE_TMPDIR}/test_dir" ]; then
+    rm -rf "$(cat "${BATS_FILE_TMPDIR}/test_dir")"
   fi
 }
 
@@ -58,9 +58,9 @@ setup() {
   bats_load_library bats-file
   bats_load_library bats-support
 
-  export PROJNAME="test-$(basename "wazum/ddev-wiremock")"
-  export TESTDIR=$(cat "${BATS_FILE_TMPDIR}/testdir")
-  cd "${TESTDIR}"
+  export PROJECT_NAME="test-$(basename "wazum/ddev-wiremock")"
+  export TEST_DIR=$(cat "${BATS_FILE_TMPDIR}/test_dir")
+  cd "${TEST_DIR}"
 }
 
 # Helper: reset WireMock state. Use in tests that add runtime stubs or
@@ -92,19 +92,19 @@ reset_wiremock() {
 }
 
 @test "wiremock container reports healthy to docker" {
-  run bash -c "docker inspect --format '{{.State.Health.Status}}' ddev-${PROJNAME}-wiremock"
+  run bash -c "docker inspect --format '{{.State.Health.Status}}' ddev-${PROJECT_NAME}-wiremock"
   assert_success
   assert_output "healthy"
 }
 
 @test "public URL serves WireMock admin" {
-  run curl -sf -k "https://${PROJNAME}.ddev.site:8443/__admin/health"
+  run curl -sf -k "https://${PROJECT_NAME}.ddev.site:8443/__admin/health"
   assert_success
   assert_output --partial "Wiremock is ok"
 }
 
 @test "sample stub is served" {
-  run curl -sf -k "https://${PROJNAME}.ddev.site:8443/sample"
+  run curl -sf -k "https://${PROJECT_NAME}.ddev.site:8443/sample"
   assert_success
   assert_output --partial "Hello from ddev-wiremock"
 }
@@ -157,7 +157,7 @@ reset_wiremock() {
 
 @test "wiremock-requests shows recent journal entries after a request" {
   reset_wiremock
-  run curl -sf -k "https://${PROJNAME}.ddev.site:8443/sample"
+  run curl -sf -k "https://${PROJECT_NAME}.ddev.site:8443/sample"
   assert_success
 
   run ddev wiremock-requests
@@ -172,7 +172,7 @@ reset_wiremock() {
 
 @test "wiremock-requests marks unmatched requests in default output" {
   reset_wiremock
-  run curl -sf -k "https://${PROJNAME}.ddev.site:8443/never-stubbed-xyz" || true
+  run curl -sf -k "https://${PROJECT_NAME}.ddev.site:8443/never-stubbed-xyz" || true
 
   run ddev wiremock-requests --limit 50
   assert_success
@@ -182,7 +182,7 @@ reset_wiremock() {
 
 @test "wiremock-requests --unmatched filters to unmatched" {
   reset_wiremock
-  run curl -sf -k "https://${PROJNAME}.ddev.site:8443/never-stubbed-path-xyz" || true
+  run curl -sf -k "https://${PROJECT_NAME}.ddev.site:8443/never-stubbed-path-xyz" || true
 
   run ddev wiremock-requests --unmatched
   assert_success
@@ -191,7 +191,7 @@ reset_wiremock() {
 
 @test "wiremock-requests --json outputs full JSON" {
   reset_wiremock
-  run curl -sf -k "https://${PROJNAME}.ddev.site:8443/sample"
+  run curl -sf -k "https://${PROJECT_NAME}.ddev.site:8443/sample"
   assert_success
 
   run ddev wiremock-requests --json
@@ -219,7 +219,7 @@ reset_wiremock() {
   run ddev exec "curl -fsS -X POST -H 'Content-Type: application/json' -d '{\"request\":{\"method\":\"GET\",\"urlPath\":\"/transient\"},\"response\":{\"status\":200,\"body\":\"transient\"}}' http://wiremock:8080/__admin/mappings"
   assert_success
 
-  run curl -sf -k "https://${PROJNAME}.ddev.site:8443/transient"
+  run curl -sf -k "https://${PROJECT_NAME}.ddev.site:8443/transient"
   assert_success
   assert_output --partial "transient"
 
@@ -227,10 +227,10 @@ reset_wiremock() {
   assert_success
   assert_output --partial "WireMock reset"
 
-  run curl -sf -k "https://${PROJNAME}.ddev.site:8443/transient"
+  run curl -sf -k "https://${PROJECT_NAME}.ddev.site:8443/transient"
   assert_failure
 
-  run curl -sf -k "https://${PROJNAME}.ddev.site:8443/sample"
+  run curl -sf -k "https://${PROJECT_NAME}.ddev.site:8443/sample"
   assert_success
   assert_output --partial "Hello from ddev-wiremock"
 }
@@ -271,7 +271,7 @@ reset_wiremock() {
   assert_output --partial "http://echo:8080"
 
   # Issue a request through WireMock - it proxies to echo and records it.
-  run curl -sf -k -H "X-Record-Test: true" "https://${PROJNAME}.ddev.site:8443/recorded-path"
+  run curl -sf -k -H "X-Record-Test: true" "https://${PROJECT_NAME}.ddev.site:8443/recorded-path"
   assert_success
 
   run ddev wiremock-record-stop
@@ -293,6 +293,54 @@ reset_wiremock() {
 
 @test "wiremock-record-stop --help prints usage" {
   run ddev wiremock-record-stop --help
+  assert_success
+  assert_output --partial "Usage:"
+}
+
+@test "wiremock-snapshot runs and reports a count" {
+  reset_wiremock
+  # Issue one request so the journal is not empty.
+  run curl -sf -k "https://${PROJECT_NAME}.ddev.site:8443/sample"
+  assert_success
+
+  run ddev wiremock-snapshot
+  assert_success
+  assert_output --partial "Snapshot complete"
+  # Count is always a non-negative integer; the exact value depends on whether
+  # the matched request is considered new by WireMock's snapshot heuristics.
+  assert_output --regexp '[0-9]+ stubs written'
+}
+
+@test "wiremock-snapshot persists new stubs from proxied requests" {
+  reset_wiremock
+  before=$(ls .ddev/wiremock/mappings/*.json 2>/dev/null | wc -l | tr -d ' ')
+
+  # Set up a proxy stub that forwards all unmatched paths to the echo sidecar.
+  # WireMock's snapshot endpoint only persists stubs when it has a real
+  # upstream response to work from; unmatched 404s are filtered out.
+  run ddev exec "curl -fsS -X POST -H 'Content-Type: application/json' -d '{\"priority\":10,\"request\":{\"method\":\"ANY\",\"urlPathPattern\":\"/proxy/.+\"},\"response\":{\"proxyBaseUrl\":\"http://echo:8080\"}}' http://wiremock:8080/__admin/mappings"
+  assert_success
+
+  # Issue a request that gets proxied to echo.
+  run curl -sf -k "https://${PROJECT_NAME}.ddev.site:8443/proxy/some-endpoint"
+  assert_success
+
+  run ddev wiremock-snapshot
+  assert_success
+  assert_output --partial "Snapshot complete"
+
+  after=$(ls .ddev/wiremock/mappings/*.json 2>/dev/null | wc -l | tr -d ' ')
+  [ "$after" -gt "$before" ]
+}
+
+@test "wiremock-snapshot rejects extra arguments" {
+  run ddev wiremock-snapshot extra
+  assert_failure
+  assert_output --partial "unexpected argument"
+}
+
+@test "wiremock-snapshot --help prints usage" {
+  run ddev wiremock-snapshot --help
   assert_success
   assert_output --partial "Usage:"
 }
