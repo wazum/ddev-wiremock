@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 #ddev-generated
 ## Description: Scaffold a new stub JSON file under .ddev/wiremock/mappings/
-## Usage: wiremock-add <METHOD> <PATH> [--status N] [--body JSON] [--content-type TYPE] [--force]
+## Usage: wiremock-add <METHOD> <PATH> [--status N] [--body JSON|@FILE|-] [--content-type TYPE] [--delay MS] [--force]
 ## Example: "ddev wiremock-add GET /users/42"
 ## Example: "ddev wiremock-add POST /users --status 201"
 ## Example: "ddev wiremock-add GET /users/42 --body '{\"id\":42,\"name\":\"Alice\"}'"
+## Example: "ddev wiremock-add GET /users/42 --body @response.json"
+## Example: "curl -s https://api.example.com/users/42 | ddev wiremock-add GET /users/42 --body -"
 ## Example: "ddev wiremock-add GET /missing --status 404 --body '{\"error\":\"not found\"}'"
+## Example: "ddev wiremock-add GET /slow --delay 3000" (to test client timeouts)
 ##
 ## Writes an exact-match stub. For regex paths or advanced features edit
 ## the JSON file afterwards; see https://wiremock.org/docs/stubbing/.
@@ -16,6 +19,7 @@ set -euo pipefail
 status=200
 body=""
 content_type="application/json"
+delay=""
 force=false
 method=""
 url_path=""
@@ -31,14 +35,26 @@ while [ $# -gt 0 ]; do
       fi
       ;;
     --body)
+      if [ $# -lt 2 ]; then
+        echo "error: --body requires a JSON argument." >&2
+        exit 2
+      fi
       shift
-      body="${1:-}"
+      body="$1"
       ;;
     --content-type)
       shift
       content_type="${1:-}"
       if [ -z "$content_type" ]; then
         echo "error: --content-type requires a value." >&2
+        exit 2
+      fi
+      ;;
+    --delay)
+      shift
+      delay="${1:-}"
+      if ! [[ "$delay" =~ ^[0-9]+$ ]]; then
+        echo "error: --delay requires a whole number of milliseconds." >&2
         exit 2
       fi
       ;;
@@ -68,6 +84,23 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
+
+case "$body" in
+  @*)
+    body_file="${body#@}"
+    if [ ! -f "$body_file" ]; then
+      echo "error: --body file not found: $body_file" >&2
+      exit 2
+    fi
+    body=$(cat "$body_file")
+    ;;
+  -)
+    body=$(cat)
+    ;;
+esac
+
+# Everything below is relative to the project root, not the caller's directory.
+cd "${DDEV_APPROOT:-.}"
 
 if [ -z "$method" ] || [ -z "$url_path" ]; then
   echo "error: METHOD and PATH are required." >&2
@@ -126,18 +159,23 @@ else
   body_value="{}"
 fi
 
-python3 - "$target" "$method_upper" "$url_path" "$status" "$content_type" "$body_field" "$body_value" <<'PY'
+python3 - "$target" "$method_upper" "$url_path" "$status" "$content_type" "$body_field" "$body_value" "$delay" <<'PY'
 import json
 import sys
 
-target, method, url_path, status, content_type, body_field, body_value = sys.argv[1:]
+target, method, url_path, status, content_type, body_field, body_value, delay = sys.argv[1:]
+# urlPath ignores the query string, url matches path and query together.
+match_field = "url" if "?" in url_path else "urlPath"
+response = {
+    "status": int(status),
+    "headers": {"Content-Type": content_type},
+    body_field: json.loads(body_value),
+}
+if delay:
+    response["fixedDelayMilliseconds"] = int(delay)
 stub = {
-    "request": {"method": method, "urlPath": url_path},
-    "response": {
-        "status": int(status),
-        "headers": {"Content-Type": content_type},
-        body_field: json.loads(body_value),
-    },
+    "request": {"method": method, match_field: url_path},
+    "response": response,
 }
 with open(target, "w") as fp:
     json.dump(stub, fp, indent=2)

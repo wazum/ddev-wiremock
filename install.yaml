@@ -12,6 +12,7 @@ project_files:
   - commands/host/wiremock-add
   - commands/host/wiremock-logs
   - commands/host/wiremock-mappings
+  - commands/host/wiremock-proxy
   - commands/host/wiremock-record
   - commands/host/wiremock-record-stop
   - commands/host/wiremock-reload

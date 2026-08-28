@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+#ddev-generated
+## Description: Forward unstubbed requests to a real upstream
+## Usage: wiremock-proxy <upstream-url> | --off
+## Example: "ddev wiremock-proxy https://api.example.com"
+## Example: "ddev wiremock-proxy --off"
+##
+## Partial mocking: your own stubs keep answering, everything else is passed
+## through to the upstream. Nothing is written to disk - use
+## 'ddev wiremock-record' when you want the responses persisted as stubs.
+##
+## The proxy is runtime state. 'ddev wiremock-reset', 'ddev wiremock-reload'
+## and a container restart all remove it.
+
+set -euo pipefail
+
+admin="http://wiremock:8080/__admin"
+# Fixed id so the proxy stub can be replaced and removed again.
+proxy_id="00000000-0000-0000-0000-0000000000ff"
+
+upstream=""
+off=false
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --off)
+      off=true
+      ;;
+    -h|--help)
+      sed -n 's/^## //p' "$0"
+      exit 0
+      ;;
+    -*)
+      echo "error: unknown option: $1" >&2
+      echo "Try: ddev wiremock-proxy --help" >&2
+      exit 2
+      ;;
+    *)
+      if [ -n "$upstream" ]; then
+        echo "error: too many arguments." >&2
+        echo "Usage: ddev wiremock-proxy <upstream-url> | --off" >&2
+        exit 2
+      fi
+      upstream="$1"
+      ;;
+  esac
+  shift
+done
+
+if [ "$off" = true ]; then
+  if ! code=$(ddev exec "curl -sS -o /dev/null -w '%{http_code}' ${admin}/mappings/${proxy_id}" 2>/dev/null); then
+    echo "error: WireMock not reachable." >&2
+    echo "Check 'ddev describe' and 'ddev wiremock-logs'." >&2
+    exit 1
+  fi
+  if [ "$code" = "404" ]; then
+    echo "No proxy active."
+    exit 0
+  fi
+  ddev exec "curl -fsS -X DELETE ${admin}/mappings/${proxy_id}" >/dev/null 2>&1
+  echo "Proxy removed. Unstubbed requests answer 404 again."
+  exit 0
+fi
+
+if [ -z "$upstream" ]; then
+  echo "error: missing upstream URL." >&2
+  echo "Usage: ddev wiremock-proxy <upstream-url> | --off" >&2
+  exit 2
+fi
+
+case "$upstream" in
+  http://*|https://*) ;;
+  *)
+    echo "error: upstream URL must start with http:// or https://. Got: $upstream" >&2
+    exit 2
+    ;;
+esac
+
+# Low precedence (higher number) so every real stub wins over the proxy.
+body=$(printf '{"id":"%s","name":"ddev wiremock-proxy","priority":10,"request":{"method":"ANY","urlPattern":".*"},"response":{"proxyBaseUrl":"%s"}}' \
+  "$proxy_id" "$upstream")
+
+ddev exec "curl -fsS -X DELETE ${admin}/mappings/${proxy_id}" >/dev/null 2>&1 || true
+
+if ! ddev exec "curl -fsS -X POST -H 'Content-Type: application/json' -d '${body}' ${admin}/mappings" >/dev/null 2>&1; then
+  echo "error: WireMock not reachable or proxy setup failed." >&2
+  echo "Check 'ddev describe' and 'ddev wiremock-logs'." >&2
+  exit 1
+fi
+
+echo "Unstubbed requests now proxy to ${upstream}."
+echo "Turn it off with: ddev wiremock-proxy --off"

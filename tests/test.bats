@@ -69,6 +69,30 @@ reset_wiremock() {
   ddev wiremock-reset --yes >/dev/null 2>&1 || true
 }
 
+# Helper: print the request-header matcher names of every stub file, lowercased.
+stub_request_header_names() {
+  python3 - <<'PY'
+import glob
+import json
+
+for path in sorted(glob.glob(".ddev/wiremock/mappings/*.json")):
+    with open(path) as fp:
+        for name in json.load(fp).get("request", {}).get("headers", {}):
+            print(name.lower())
+PY
+}
+
+# Helper: print the rendered command line of the wiremock compose service.
+wiremock_service_command() {
+  ddev debug compose-config | python3 -c '
+import sys
+import yaml
+
+command = yaml.safe_load(sys.stdin)["services"]["wiremock"]["command"]
+print(command if isinstance(command, str) else " ".join(command))
+'
+}
+
 @test "install places all project files" {
   assert_file_exist .ddev/docker-compose.wiremock.yaml
   assert_file_exist .ddev/config.wiremock.yaml
@@ -79,6 +103,7 @@ reset_wiremock() {
   assert_file_exist .ddev/commands/host/wiremock-add
   assert_file_exist .ddev/commands/host/wiremock-logs
   assert_file_exist .ddev/commands/host/wiremock-mappings
+  assert_file_exist .ddev/commands/host/wiremock-proxy
   assert_file_exist .ddev/commands/host/wiremock-record
   assert_file_exist .ddev/commands/host/wiremock-record-stop
   assert_file_exist .ddev/commands/host/wiremock-reload
@@ -276,6 +301,12 @@ reset_wiremock() {
   assert_output --partial "too many"
 }
 
+@test "wiremock-record rejects an upstream URL without a scheme" {
+  run ddev wiremock-record api.example.com
+  assert_failure
+  assert_output --partial "must start with http"
+}
+
 @test "wiremock-record and wiremock-record-stop capture stubs from the echo sidecar" {
   reset_wiremock
   # Count existing stub files so we can diff.
@@ -298,6 +329,44 @@ reset_wiremock() {
   # At least one new stub file was created.
   after=$(ls .ddev/wiremock/mappings/*.json 2>/dev/null | wc -l | tr -d ' ')
   [ "$after" -gt "$before" ]
+}
+
+@test "recorded stubs do not match on the Authorization header" {
+  reset_wiremock
+
+  run ddev wiremock-record http://echo:8080
+  assert_success
+
+  run curl -sf -k -H "Authorization: Bearer secret-token-xyz" \
+    "https://${PROJECT_NAME}.ddev.site:8443/auth-capture-test"
+  assert_success
+
+  run ddev wiremock-record-stop
+  assert_success
+
+  run stub_request_header_names
+  assert_success
+  refute_output --partial "authorization"
+
+  rm -f .ddev/wiremock/mappings/*auth-capture-test*.json
+}
+
+@test "wiremock-record reads the HTTPS port from the project root, not the current directory" {
+  mkdir -p sub
+  cp .ddev/.env.wiremock "${BATS_TEST_TMPDIR}/env.bak"
+  printf '#ddev-generated\nWIREMOCK_TAG=3x\nWIREMOCK_HTTP_PORT=8080\nWIREMOCK_HTTPS_PORT=9443\n' \
+    > .ddev/.env.wiremock
+
+  run bash -c "cd sub && ddev wiremock-record http://echo:8080"
+  saved_status="$status"
+  saved_output="$output"
+
+  ddev wiremock-record-stop >/dev/null 2>&1 || true
+  cp "${BATS_TEST_TMPDIR}/env.bak" .ddev/.env.wiremock
+  rmdir sub
+
+  [ "$saved_status" -eq 0 ]
+  [[ "$saved_output" == *"https://${PROJECT_NAME}.ddev.site:9443"* ]]
 }
 
 @test "wiremock-record --help prints usage" {
@@ -338,7 +407,8 @@ reset_wiremock() {
   assert_success
 
   # Issue a request that gets proxied to echo.
-  run curl -sf -k "https://${PROJECT_NAME}.ddev.site:8443/proxy/some-endpoint"
+  run curl -sf -k -H "Authorization: Bearer snapshot-secret-xyz" \
+    "https://${PROJECT_NAME}.ddev.site:8443/proxy/some-endpoint"
   assert_success
 
   run ddev wiremock-snapshot
@@ -347,6 +417,12 @@ reset_wiremock() {
 
   after=$(ls .ddev/wiremock/mappings/*.json 2>/dev/null | wc -l | tr -d ' ')
   [ "$after" -gt "$before" ]
+
+  run stub_request_header_names
+  assert_success
+  refute_output --partial "authorization"
+
+  rm -f .ddev/wiremock/mappings/*some-endpoint*.json
 }
 
 @test "wiremock-snapshot rejects extra arguments" {
@@ -359,6 +435,61 @@ reset_wiremock() {
   run ddev wiremock-snapshot --help
   assert_success
   assert_output --partial "Usage:"
+}
+
+@test "wiremock-proxy forwards unstubbed paths upstream without writing stubs" {
+  reset_wiremock
+  before=$(ls .ddev/wiremock/mappings/*.json 2>/dev/null | wc -l | tr -d ' ')
+
+  run ddev wiremock-proxy http://echo:8080
+  assert_success
+  assert_output --partial "http://echo:8080"
+
+  # Unstubbed path reaches the echo sidecar instead of answering 404.
+  run curl -sf -k "https://${PROJECT_NAME}.ddev.site:8443/proxied-through"
+  assert_success
+  assert_output --partial "/proxied-through"
+
+  # File-backed stubs still win over the proxy.
+  run curl -sf -k "https://${PROJECT_NAME}.ddev.site:8443/sample"
+  assert_success
+  assert_output --partial "Hello from ddev-wiremock"
+
+  # Unlike recording, proxying persists nothing.
+  after=$(ls .ddev/wiremock/mappings/*.json 2>/dev/null | wc -l | tr -d ' ')
+  [ "$after" -eq "$before" ]
+
+  run ddev wiremock-proxy --off
+  assert_success
+  assert_output --partial "Proxy removed"
+
+  run curl -sf -k "https://${PROJECT_NAME}.ddev.site:8443/proxied-through"
+  assert_failure
+}
+
+@test "wiremock-proxy --off without an active proxy says so" {
+  run ddev wiremock-proxy --off
+  assert_success
+  assert_output --partial "No proxy"
+}
+
+@test "wiremock-proxy requires an upstream URL" {
+  run ddev wiremock-proxy
+  assert_failure
+  assert_output --partial "missing upstream URL"
+}
+
+@test "wiremock-proxy rejects an upstream URL without a scheme" {
+  run ddev wiremock-proxy api.example.com
+  assert_failure
+  assert_output --partial "must start with http"
+}
+
+@test "wiremock-proxy --help prints usage" {
+  run ddev wiremock-proxy --help
+  assert_success
+  assert_output --partial "Usage:"
+  assert_output --partial "--off"
 }
 
 @test "wiremock-add writes a stub and wiremock-reload makes it live" {
@@ -422,6 +553,110 @@ reset_wiremock() {
   rm -f .ddev/wiremock/mappings/get-duplicate.json
 }
 
+@test "wiremock-add stubs a path with a query string" {
+  reset_wiremock
+  rm -f .ddev/wiremock/mappings/get-search-q-foo.json
+
+  run ddev wiremock-add GET '/search?q=foo' --body '{"hit":true}'
+  assert_success
+  assert_file_exist .ddev/wiremock/mappings/get-search-q-foo.json
+
+  ddev wiremock-reload >/dev/null
+  run curl -sf -k "https://${PROJECT_NAME}.ddev.site:8443/search?q=foo"
+  assert_success
+  assert_output --partial '"hit":true'
+
+  rm -f .ddev/wiremock/mappings/get-search-q-foo.json
+}
+
+@test "wiremock-add works from a project subdirectory" {
+  rm -f .ddev/wiremock/mappings/get-from-subdir.json
+  mkdir -p sub/deeper
+
+  run bash -c "cd sub/deeper && ddev wiremock-add GET /from-subdir"
+  assert_success
+  assert_file_exist .ddev/wiremock/mappings/get-from-subdir.json
+
+  rm -rf sub
+  rm -f .ddev/wiremock/mappings/get-from-subdir.json
+}
+
+@test "wiremock-add reports a clear error when --body has no value" {
+  run ddev wiremock-add GET /no-body-value --body
+  assert_failure
+  assert_output --partial "--body requires"
+}
+
+@test "wiremock-add --delay makes the stub respond slowly" {
+  reset_wiremock
+  rm -f .ddev/wiremock/mappings/get-slow.json
+
+  run ddev wiremock-add GET /slow --delay 500
+  assert_success
+
+  ddev wiremock-reload >/dev/null
+  run curl -sf -k -o /dev/null -w '%{time_total}' "https://${PROJECT_NAME}.ddev.site:8443/slow"
+  assert_success
+  elapsed="$output"
+
+  run awk -v seconds="$elapsed" 'BEGIN { exit !(seconds >= 0.4) }'
+  assert_success
+
+  rm -f .ddev/wiremock/mappings/get-slow.json
+}
+
+@test "wiremock-add --delay rejects non-numeric values" {
+  run ddev wiremock-add GET /slow-bad --delay abc
+  assert_failure
+  assert_output --partial "--delay requires"
+}
+
+@test "wiremock-add reads --body from a file" {
+  rm -f .ddev/wiremock/mappings/get-from-file.json
+  echo '{"from":"file"}' > "${BATS_TEST_TMPDIR}/payload.json"
+
+  run ddev wiremock-add GET /from-file --body "@${BATS_TEST_TMPDIR}/payload.json"
+  assert_success
+
+  run cat .ddev/wiremock/mappings/get-from-file.json
+  assert_output --partial '"from": "file"'
+
+  rm -f .ddev/wiremock/mappings/get-from-file.json
+}
+
+@test "wiremock-add resolves a relative --body file against the current directory" {
+  rm -f .ddev/wiremock/mappings/get-relative-body.json
+  mkdir -p sub
+  echo '{"from":"subdir"}' > sub/payload.json
+
+  run bash -c "cd sub && ddev wiremock-add GET /relative-body --body @payload.json"
+  assert_success
+
+  run cat .ddev/wiremock/mappings/get-relative-body.json
+  assert_output --partial '"from": "subdir"'
+
+  rm -rf sub
+  rm -f .ddev/wiremock/mappings/get-relative-body.json
+}
+
+@test "wiremock-add reads --body from stdin" {
+  rm -f .ddev/wiremock/mappings/get-from-stdin.json
+
+  run bash -c "echo '{\"from\":\"stdin\"}' | ddev wiremock-add GET /from-stdin --body -"
+  assert_success
+
+  run cat .ddev/wiremock/mappings/get-from-stdin.json
+  assert_output --partial '"from": "stdin"'
+
+  rm -f .ddev/wiremock/mappings/get-from-stdin.json
+}
+
+@test "wiremock-add reports a missing --body file" {
+  run ddev wiremock-add GET /missing-file --body @does-not-exist.json
+  assert_failure
+  assert_output --partial "not found"
+}
+
 @test "wiremock-add rejects invalid JSON bodies" {
   run ddev wiremock-add GET /bad --body 'not-json'
   assert_failure
@@ -458,4 +693,20 @@ reset_wiremock() {
   run ddev wiremock-reload --help
   assert_success
   assert_output --partial "Usage:"
+}
+
+@test "WIREMOCK_ARGS from .env.wiremock reaches the container command line" {
+  cp .ddev/.env.wiremock "${BATS_TEST_TMPDIR}/env.bak"
+  printf '#ddev-generated\nWIREMOCK_TAG=3x\nWIREMOCK_HTTP_PORT=8080\nWIREMOCK_HTTPS_PORT=8443\nWIREMOCK_ARGS=--max-request-journal-entries=7\n' \
+    > .ddev/.env.wiremock
+
+  run wiremock_service_command
+  saved_status="$status"
+  saved_output="$output"
+
+  cp "${BATS_TEST_TMPDIR}/env.bak" .ddev/.env.wiremock
+
+  [ "$saved_status" -eq 0 ]
+  [[ "$saved_output" == *"--global-response-templating"* ]]
+  [[ "$saved_output" == *"--max-request-journal-entries=7"* ]]
 }

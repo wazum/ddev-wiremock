@@ -10,6 +10,8 @@
 
 set -euo pipefail
 
+cd "${DDEV_APPROOT:-.}"
+
 for arg in "$@"; do
   if [ "$arg" = "-h" ] || [ "$arg" = "--help" ]; then
     sed -n 's/^## //p' "$0"
@@ -31,13 +33,20 @@ fi
 
 upstream="$1"
 
+case "$upstream" in
+  http://*|https://*) ;;
+  *)
+    echo "error: upstream URL must start with http:// or https://. Got: $upstream" >&2
+    exit 2
+    ;;
+esac
+
 body=$(cat <<JSON
 {
   "targetBaseUrl": "${upstream}",
   "persist": true,
   "captureHeaders": {
-    "Accept": {},
-    "Authorization": {}
+    "Accept": {}
   },
   "repeatsAsScenarios": false
 }
@@ -50,9 +59,9 @@ if ! ddev exec "curl -fsS -X POST -H 'Content-Type: application/json' -d '${body
   exit 1
 fi
 
-hostname=$(ddev describe -j 2>/dev/null | docker run -i --rm ddev/ddev-utilities jq -r '.raw.hostname // ""' 2>/dev/null || true)
+hostname="${DDEV_HOSTNAME:-<project>.ddev.site}"
 https_port=$(grep '^WIREMOCK_HTTPS_PORT=' .ddev/.env.wiremock 2>/dev/null | cut -d= -f2 | tr -d '"' || echo 8443)
-public_url="https://${hostname:-<project>.ddev.site}:${https_port:-8443}"
+public_url="https://${hostname%%,*}:${https_port:-8443}"
 
 echo "Recording started against ${upstream}."
 echo "Issue requests through ${public_url}, then run: ddev wiremock-record-stop"

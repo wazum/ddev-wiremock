@@ -4,6 +4,34 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project uses
 semantic versioning.
 
+## [Unreleased]
+
+### Added
+- `ddev wiremock-proxy <url>` - pass unstubbed requests through to a real
+  upstream for partial mocking. `--off` removes the proxy. Nothing is
+  written to disk.
+- `ddev wiremock-add --delay MS` - stub a slow response, for testing
+  client timeouts and retries.
+- `ddev wiremock-add --body @FILE` and `--body -` - read the response body
+  from a file or from stdin instead of a shell argument.
+- `WIREMOCK_ARGS` in `.env.wiremock` - extra WireMock CLI flags appended
+  to the container command.
+
+### Fixed
+- Recording and snapshots no longer capture the `Authorization` header
+  into stub request matchers. Recorded stubs embedded the caller's token,
+  which leaked it into the repository and made the stub match for that
+  one token only.
+- `wiremock-add` and `wiremock-record` work from any subdirectory of the
+  project.
+- `wiremock-add` with a query string now writes a stub that can match
+  (`url` instead of `urlPath`).
+- `wiremock-add --body` without a value fails with a usage error instead
+  of exiting silently.
+- `wiremock-record` rejects an upstream URL without a scheme, and no
+  longer starts a throwaway Docker container to resolve the project
+  hostname.
+
 ## [0.2.0] - 2026-04-21
 
 ### Added
@@ -36,5 +64,6 @@ Initial release.
   recording workflows.
 - GitHub Actions CI (lint + bats).
 
+[Unreleased]: https://github.com/wazum/ddev-wiremock/compare/v0.2.0...HEAD
 [0.2.0]: https://github.com/wazum/ddev-wiremock/releases/tag/v0.2.0
 [0.1.0]: https://github.com/wazum/ddev-wiremock/releases/tag/v0.1.0

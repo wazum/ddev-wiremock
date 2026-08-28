@@ -23,7 +23,7 @@ if [ $# -gt 0 ]; then
   exit 2
 fi
 
-body='{"outputFormat":"full","persist":true,"captureHeaders":{"Accept":{},"Authorization":{}}}'
+body='{"outputFormat":"full","persist":true,"captureHeaders":{"Accept":{}}}'
 
 if ! count=$(ddev exec "curl -fsS -X POST -H 'Content-Type: application/json' -d '${body}' http://wiremock:8080/__admin/recordings/snapshot | jq '.mappings | length'" 2>&1); then
   echo "error: WireMock not reachable or snapshot failed." >&2

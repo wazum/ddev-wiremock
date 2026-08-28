@@ -17,10 +17,7 @@ services:
     volumes:
       - ".:/mnt/ddev_config"
       - "./wiremock:/home/wiremock"
-    command:
-      - "--global-response-templating"
-      - "--disable-banner"
-      - "--verbose"
+    command: "--global-response-templating --disable-banner --verbose ${WIREMOCK_ARGS:-}"
     healthcheck:
       test: ["CMD-SHELL", "curl -fs http://localhost:8080/__admin/health >/dev/null || exit 1"]
       interval: 10s
