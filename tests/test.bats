@@ -69,7 +69,7 @@ reset_wiremock() {
   ddev wiremock-reset --yes >/dev/null 2>&1 || true
 }
 
-# Helper: print the request-header matcher names of every stub file, lowercased.
+# Helper: matcher header names of every stub file, lowercased.
 stub_request_header_names() {
   python3 - <<'PY'
 import glob
@@ -82,7 +82,6 @@ for path in sorted(glob.glob(".ddev/wiremock/mappings/*.json")):
 PY
 }
 
-# Helper: print the rendered command line of the wiremock compose service.
 wiremock_service_command() {
   ddev debug compose-config | python3 -c '
 import sys
@@ -445,7 +444,7 @@ print(command if isinstance(command, str) else " ".join(command))
   assert_success
   assert_output --partial "http://echo:8080"
 
-  # Unstubbed path reaches the echo sidecar instead of answering 404.
+  # Would answer 404 without the proxy.
   run curl -sf -k "https://${PROJECT_NAME}.ddev.site:8443/proxied-through"
   assert_success
   assert_output --partial "/proxied-through"
@@ -523,7 +522,7 @@ print(command if isinstance(command, str) else " ".join(command))
   run cat .ddev/wiremock/mappings/post-items.json
   assert_success
   assert_output --partial '"status": 201'
-  assert_output --partial '"id": 99'
+  assert_output --partial '"id":99'
 
   ddev wiremock-reload >/dev/null
   run curl -s -k -X POST -w '\n%{http_code}' "https://${PROJECT_NAME}.ddev.site:8443/items"
@@ -548,7 +547,7 @@ print(command if isinstance(command, str) else " ".join(command))
   run ddev wiremock-add GET /duplicate --force --body '{"v":2}'
   assert_success
   run cat .ddev/wiremock/mappings/get-duplicate.json
-  assert_output --partial '"v": 2'
+  assert_output --partial '"v":2'
 
   rm -f .ddev/wiremock/mappings/get-duplicate.json
 }
@@ -619,7 +618,7 @@ print(command if isinstance(command, str) else " ".join(command))
   assert_success
 
   run cat .ddev/wiremock/mappings/get-from-file.json
-  assert_output --partial '"from": "file"'
+  assert_output --partial '"from":"file"'
 
   rm -f .ddev/wiremock/mappings/get-from-file.json
 }
@@ -633,7 +632,7 @@ print(command if isinstance(command, str) else " ".join(command))
   assert_success
 
   run cat .ddev/wiremock/mappings/get-relative-body.json
-  assert_output --partial '"from": "subdir"'
+  assert_output --partial '"from":"subdir"'
 
   rm -rf sub
   rm -f .ddev/wiremock/mappings/get-relative-body.json
@@ -646,7 +645,7 @@ print(command if isinstance(command, str) else " ".join(command))
   assert_success
 
   run cat .ddev/wiremock/mappings/get-from-stdin.json
-  assert_output --partial '"from": "stdin"'
+  assert_output --partial '"from":"stdin"'
 
   rm -f .ddev/wiremock/mappings/get-from-stdin.json
 }
@@ -655,6 +654,47 @@ print(command if isinstance(command, str) else " ".join(command))
   run ddev wiremock-add GET /missing-file --body @does-not-exist.json
   assert_failure
   assert_output --partial "not found"
+}
+
+@test "wiremock-add does not use python3 on the host" {
+  rm -f .ddev/wiremock/mappings/get-no-python.json
+  mkdir -p "${BATS_TEST_TMPDIR}/bin"
+  printf '#!/bin/sh\necho "python3 must not be used" >&2\nexit 127\n' \
+    > "${BATS_TEST_TMPDIR}/bin/python3"
+  chmod +x "${BATS_TEST_TMPDIR}/bin/python3"
+
+  run env PATH="${BATS_TEST_TMPDIR}/bin:$PATH" \
+    ddev wiremock-add GET /no-python --body '{"ok":true}'
+  assert_success
+  refute_output --partial "python3 must not be used"
+
+  run python3 -m json.tool .ddev/wiremock/mappings/get-no-python.json
+  assert_success
+  assert_output --partial '"ok"'
+
+  rm -f .ddev/wiremock/mappings/get-no-python.json
+}
+
+@test "wiremock-add writes the stub even when the project cannot be reached" {
+  rm -f .ddev/wiremock/mappings/get-offline.json
+  mkdir -p "${BATS_TEST_TMPDIR}/nobin"
+
+  # No ddev on PATH, so the JSON check cannot run.
+  run env -i PATH="${BATS_TEST_TMPDIR}/nobin:/usr/bin:/bin" DDEV_APPROOT="${TEST_DIR}" \
+    bash "${TEST_DIR}/.ddev/commands/host/wiremock-add" GET /offline --body '{"offline":true}'
+  assert_success
+  assert_output --partial "skipped JSON validation"
+
+  run python3 -m json.tool .ddev/wiremock/mappings/get-offline.json
+  assert_success
+
+  rm -f .ddev/wiremock/mappings/get-offline.json
+}
+
+@test "wiremock-add rejects a path containing a double quote" {
+  run ddev wiremock-add GET '/quo"te'
+  assert_failure
+  assert_output --partial "must not contain"
 }
 
 @test "wiremock-add rejects invalid JSON bodies" {

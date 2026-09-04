@@ -99,7 +99,7 @@ case "$body" in
     ;;
 esac
 
-# Everything below is relative to the project root, not the caller's directory.
+# Paths above here are the caller's, below here the project's.
 cd "${DDEV_APPROOT:-.}"
 
 if [ -z "$method" ] || [ -z "$url_path" ]; then
@@ -126,6 +126,13 @@ case "$url_path" in
     ;;
 esac
 
+case "${url_path}${content_type}" in
+  *'"'*|*\\*)
+    echo "error: PATH and --content-type must not contain double quotes or backslashes." >&2
+    exit 2
+    ;;
+esac
+
 method_lower=$(printf '%s' "$method_upper" | tr '[:upper:]' '[:lower:]')
 path_slug=$(printf '%s' "${url_path#/}" | sed -e 's/[^a-zA-Z0-9._-]/-/g' -e 's/--*/-/g' -e 's/^-//' -e 's/-$//')
 if [ -z "$path_slug" ]; then
@@ -145,42 +152,57 @@ if [ -f "$target" ] && [ "$force" != true ]; then
   exit 1
 fi
 
-# Validate --body as JSON (if provided) and build the response object.
-if [ -n "$body" ]; then
-  if ! printf '%s' "$body" | python3 -c "import json,sys; json.load(sys.stdin)" >/dev/null 2>&1; then
+# urlPath ignores the query string, url matches path and query together.
+case "$url_path" in
+  *\?*) match_field="url" ;;
+  *) match_field="urlPath" ;;
+esac
+
+if [ -z "$body" ]; then
+  body_value="{}"
+else
+  # The body is kept as given, not reformatted.
+  body_value=$(printf '%s' "$body" | sed '2,$s/^/    /')
+fi
+
+delay_line=""
+if [ -n "$delay" ]; then
+  delay_line=$'\n    "fixedDelayMilliseconds": '"${delay},"
+fi
+
+stub=$(cat <<JSON
+{
+  "request": {
+    "method": "${method_upper}",
+    "${match_field}": "${url_path}"
+  },
+  "response": {
+    "status": ${status},
+    "headers": {
+      "Content-Type": "${content_type}"
+    },${delay_line}
+    "jsonBody": ${body_value}
+  }
+}
+JSON
+)
+
+# jq runs in the web container so the host needs no JSON tooling.
+check=$(printf '%s' "$stub" | ddev exec "jq . >/dev/null 2>&1 && echo JSON_OK || echo JSON_BAD" 2>/dev/null) || check=""
+
+case "$check" in
+  *JSON_BAD*)
     echo "error: --body must be valid JSON." >&2
     echo "Got: $body" >&2
     exit 2
-  fi
-  body_field="jsonBody"
-  body_value="$body"
-else
-  body_field="jsonBody"
-  body_value="{}"
-fi
+    ;;
+  *JSON_OK*) ;;
+  *)
+    echo "note: could not reach the project, skipped JSON validation." >&2
+    ;;
+esac
 
-python3 - "$target" "$method_upper" "$url_path" "$status" "$content_type" "$body_field" "$body_value" "$delay" <<'PY'
-import json
-import sys
-
-target, method, url_path, status, content_type, body_field, body_value, delay = sys.argv[1:]
-# urlPath ignores the query string, url matches path and query together.
-match_field = "url" if "?" in url_path else "urlPath"
-response = {
-    "status": int(status),
-    "headers": {"Content-Type": content_type},
-    body_field: json.loads(body_value),
-}
-if delay:
-    response["fixedDelayMilliseconds"] = int(delay)
-stub = {
-    "request": {"method": method, match_field: url_path},
-    "response": response,
-}
-with open(target, "w") as fp:
-    json.dump(stub, fp, indent=2)
-    fp.write("\n")
-PY
+printf '%s\n' "$stub" > "$target"
 
 echo "Wrote ${target}"
 echo "Run 'ddev wiremock-reload' to activate the stub."

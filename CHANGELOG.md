@@ -17,7 +17,16 @@ semantic versioning.
 - `WIREMOCK_ARGS` in `.env.wiremock` - extra WireMock CLI flags appended
   to the container command.
 
+### Changed
+- `wiremock-add` stores the response body exactly as given instead of
+  re-formatting it, so a body read from a file keeps its own layout.
+
 ### Fixed
+- `wiremock-add` no longer needs `python3` on the host. The stub JSON is
+  composed in the shell and checked with the web container's `jq`, which
+  makes the command work in DDEV's git-bash shell on Windows. When the
+  project is not running the stub is still written, with a note that the
+  JSON check was skipped.
 - Recording and snapshots no longer capture the `Authorization` header
   into stub request matchers. Recorded stubs embedded the caller's token,
   which leaked it into the repository and made the stub match for that
